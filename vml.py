@@ -120,15 +120,18 @@ def is_valid_video(url, model, target_class="car"):
 
 
 # 4. 유효 영상 다운로드 함수
-def download_valid_videos(video_infos, model, output_dir="./videos"):
+# [수정] 유효한 영상만 다운로드
+def download_valid_videos(video_infos, model, target_class="car", output_dir="./videos"):
     """검증된 영상만 지정된 폴더에 다운로드합니다."""
     os.makedirs(output_dir, exist_ok=True) # 다운로드 폴더 생성
     downloaded_count = 0
     for idx, video in enumerate(video_infos):
         print(f"\n⏳ ({idx+1}/{len(video_infos)}) 검증 시도 중: {video['title']}")
+        
         # is_valid_video 함수로 영상이 유효한지 확인
-        if not is_valid_video(video["url"], model=model, target_class="car"):
-            print(f"⛔ '{'car'}' 없음 (스킵): {video['title']}")
+        # hardcoded "car" 대신, 함수 인자로 받은 target_class를 사용하도록 수정
+        if not is_valid_video(video["url"], model=model, target_class=target_class):
+            print(f"⛔ '{target_class}' 없음 (스킵): {video['title']}")
             continue # 없으면 다음 영상으로 넘어감
         
         filename = f"video_{downloaded_count+1}.mp4"
@@ -176,19 +179,38 @@ def extract_frames_from_videos(video_dir='./videos', frame_root_dir='./frames'):
 
 # --- 메인 실행 블록 ---
 if __name__ == "__main__":
-    # 1. 검색할 키워드 정의
-    keywords = ["야간 고속도로 CCTV"]
+    # 1. 키워드 생성기 import 및 인스턴스 생성
+    from RQ2_LLM_main import KeywordGenerator
     
-    # 2. 유튜브 영상 검색 실행
-    video_infos = search_youtube_videos(keywords, limit=5)
+    keyword_gen = KeywordGenerator(
+        max_keywords=2, # 한 번에 생성할 최대 키워드 수
+        min_keywords=1   # 한 번에 생성할 최소 키워드 수
+    )
+
+    # 2. AI를 통해 새로운 키워드 생성 요청
+    print("AI를 통해 새로운 검색 키워드를 생성합니다...")
+    keyword_gen.generate_traffic_keywords_auto_by_openai()
+
+    # 3. 생성된 키워드를 리스트로 가져오기
+    # .get_new_keyword()는 제너레이터이므로 list()로 변환하여 사용합니다.
+    keywords_to_search = list(keyword_gen.get_new_keyword())
     
-    if not video_infos:
-        print("검색된 영상이 없습니다. 키워드를 확인해주세요.")
+    if not keywords_to_search:
+        print("새롭게 생성된 키워드가 없습니다. past_keyword.json을 확인하거나 프로그램을 종료합니다.")
     else:
-        # 3. 유효한 영상 다운로드 실행
-        download_valid_videos(video_infos, model=model, target_class="car") # target_class를 바꿀 수 있음
+        print(f"\nAI가 생성한 키워드({len(keywords_to_search)}개): {keywords_to_search}")
         
-        # 4. 다운로드된 영상에서 프레임 추출 실행
-        extract_frames_from_videos()
-        
-        print("\n모든 작업이 완료되었습니다.")
+        # 4. 생성된 키워드로 영상 검색 실행 (기존 코드 재활용)
+        # limit=3은 키워드 당 3개의 영상을 검색하라는 의미
+        video_infos = search_youtube_videos(keywords_to_search, limit=3) 
+    
+        if not video_infos:
+            print("검색된 영상이 없습니다.")
+        else:
+            # 5. 유효한 영상 다운로드 실행
+            download_valid_videos(video_infos, model=model, target_class="car")
+            
+            # 6. 다운로드된 영상에서 프레임 추출 실행
+            extract_frames_from_videos()
+            
+            print("\n모든 작업이 완료되었습니다.")
